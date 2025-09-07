@@ -443,6 +443,58 @@ Recommended (interactive)
 - After first boot, SSH in and run:
   - `cd /home/pi/metro_clock && sudo ./setup.sh`
   - Follow prompts (installs deps, asks for WMATA key and address, installs services, configures sleep timers and weekly reboot).
+ - Raspberry Pi Imager setup (optional, before first boot): In Advanced options, set Wi‑Fi country, SSID, password, SSH. You may paste the following script into “Run a script” if you want the installer to prefill your WMATA key and geocode your address, then still guide you interactively for any extras:
+   ```bash
+   #!/usr/bin/env bash
+   set -euo pipefail
+   umask 027
+   exec > >(tee -a /var/log/firstboot-metro.log) 2>&1
+   set +x
+
+   # EDIT THESE (prefill; setup.sh will still run interactively later if you choose)
+   WMATA_API_KEY="YOUR_REAL_KEY_HERE"
+   ADDRESS="123 Main St, Arlington, VA"
+   RADIUS_M="1200"
+
+   apt-get update
+   apt-get install -y --no-install-recommends git ca-certificates jq curl
+
+   install -d -m 0755 -o pi -g pi /home/pi
+   cd /home/pi
+   if [ ! -d metro_clock/.git ]; then
+     sudo -u pi git clone https://github.com/jamesdahall/metro_clock.git
+   fi
+   cd metro_clock
+
+   # Geocode to seed config
+   HOME_LAT=""; HOME_LON=""
+   if [ -n "$ADDRESS" ]; then
+     GEO_JSON=$(curl -sS -A "metro-clock-firstboot/1.0" --get \
+       --data-urlencode "q=${ADDRESS}" \
+       --data-urlencode "format=json" \
+       --data-urlencode "limit=1" \
+       https://nominatim.openstreetmap.org/search || true)
+     HOME_LAT=$(echo "$GEO_JSON" | jq -r '.[0].lat // empty')
+     HOME_LON=$(echo "$GEO_JSON" | jq -r '.[0].lon // empty')
+   fi
+   : "${HOME_LAT:=38.8895}"; : "${HOME_LON:=-77.0353}"
+
+   # Write env securely
+   install -d -m 0755 /etc/default
+   cat > /etc/default/metro-clock <<EOF
+WMATA_API_KEY=${WMATA_API_KEY}
+HOST=127.0.0.1
+PORT=8080
+PYTHONPATH=/home/pi/metro_clock
+EOF
+   chmod 0640 /etc/default/metro-clock
+
+   # Pre-install minimal deps so setup.sh runs smoothly
+   ./update.sh --apt
+
+   # Cleanup common first-boot artifacts
+   rm -f /boot/firstrun.sh /boot/user-data 2>/dev/null || true
+   ```
 
 Advanced (optional)
 - Minimal deps only: `sudo ./update.sh --apt`

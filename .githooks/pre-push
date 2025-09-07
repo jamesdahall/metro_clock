@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Pre-push hook to prevent committing obvious secrets.
+# Scans the commits being pushed for common token patterns.
+
+red() { printf "\033[31m%s\033[0m\n" "$*"; }
+err() { red "[SECURITY] $*" >&2; }
+
+blocked=0
+
+check_range() {
+  local range="$1"
+  # Patterns for common secrets
+  local patterns=(
+    'ghp_[A-Za-z0-9]{36,}'
+    'glpat-[A-Za-z0-9_-]{20,}'
+    'AKIA[0-9A-Z]{16}'
+    'xox[baprs]-[A-Za-z0-9-]{20,}'
+    'Bearer [A-Za-z0-9._-]{20,}'
+  )
+
+  # Check generic patterns
+  for pat in "${patterns[@]}"; do
+    if git grep -I -nE --perl-regexp "$pat" $range -- ':!README.md' ':!**/README.*' ':!.githooks/*' > /dev/null; then
+      err "Potential secret matching pattern '$pat' found in range $range. Aborting push."
+      git grep -I -nE --perl-regexp "$pat" $range -- ':!README.md' ':!**/README.*' ':!.githooks/*' | sed 's/^/  /' >&2
+      blocked=1
+    fi
+  done
+
+  # Specific guard for WMATA_API_KEY lines containing a likely real value
+  # Allow placeholders like YOUR_KEY; block if looks like a real token (>=16 chars, not YOUR_KEY)
+  if git grep -I -nE '^WMATA_API_KEY=([^#\n]{16,})' $range -- ':!README.md' ':!**/README.*' ':!.githooks/*' | grep -v 'WMATA_API_KEY=YOUR_KEY' >/dev/null; then
+    err "Potential WMATA_API_KEY value found committed. Aborting push."
+    git grep -I -nE '^WMATA_API_KEY=([^#\n]{16,})' $range -- ':!README.md' ':!**/README.*' ':!.githooks/*' | sed 's/^/  /' >&2
+    blocked=1
+  fi
+}
+
+# Read refs from stdin
+while read -r local_ref local_sha remote_ref remote_sha; do
+  # New branch
+  if [[ "$remote_sha" == 0000000000000000000000000000000000000000 ]]; then
+    # All commits reachable from local_sha that are not on any remote
+    range="$local_sha"
+  else
+    range="$remote_sha..$local_sha"
+  fi
+  check_range "$range"
+done
+
+if [[ $blocked -eq 1 ]]; then
+  err "Push rejected due to potential secrets in commit range. Please remove secrets and try again."
+  exit 1
+fi
+
+exit 0
+

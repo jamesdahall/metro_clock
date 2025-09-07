@@ -381,8 +381,8 @@ If Bookworm issues on Zero W
 Install Options
 ---------------
 
-Easy (hands‑off)
-- In Raspberry Pi Imager Advanced options, set Wi‑Fi country, SSID, password, SSH, and paste this into “Run a script” (edit the first 3 vars):
+Easy (hands‑off) — when Imager supports “Run a script”
+- If your Raspberry Pi Imager offers Advanced → “Run a script”, you can paste this at image time (edit the first 3 vars):
   ```bash
   #!/usr/bin/env bash
   set -euo pipefail
@@ -439,11 +439,38 @@ EOF
   rm -f /boot/firstrun.sh /boot/user-data 2>/dev/null || true
   ```
 
+No “Run a script” available? (Use this instead)
+- After first boot, SSH in and run these two blocks — the first installs all required apt packages, the second clones and runs the guided installer:
+  ```bash
+  # 1) Install required packages on a slim Pi OS
+  sudo apt-get update
+  sudo apt-get install -y --no-install-recommends \
+    git ca-certificates curl jq \
+    python3 python3-venv python3-pip \
+    xserver-xorg xinit unclutter \
+    fonts-noto-core fonts-noto-color-emoji \
+    libraspberrypi-bin unattended-upgrades
+  # Chromium package differs across releases
+  sudo apt-get install -y chromium-browser || sudo apt-get install -y chromium || true
+  # Enable unattended security upgrades
+  sudo tee /etc/apt/apt.conf.d/20auto-upgrades >/dev/null <<'EOF'
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Unattended-Upgrade "1";
+EOF
+
+  # 2) Clone and run the one-shot installer
+  cd /home/pi
+  [ -d metro_clock/.git ] || { [ -d metro_clock ] && mv metro_clock metro_clock.bak.$(date +%s) || true; }
+  sudo -u pi git clone https://github.com/jamesdahall/metro_clock.git
+  cd metro_clock
+  sudo ./setup.sh
+  ```
+
 Recommended (interactive)
 - After first boot, SSH in and run:
   - `cd /home/pi/metro_clock && sudo ./setup.sh`
   - Follow prompts (installs deps, asks for WMATA key and address, installs services, configures sleep timers and weekly reboot).
- - Raspberry Pi Imager setup (optional, before first boot): In Advanced options, set Wi‑Fi country, SSID, password, SSH. You may paste the following script into “Run a script” if you want the installer to prefill your WMATA key and geocode your address, then still guide you interactively for any extras:
+ - Raspberry Pi Imager setup (optional, before first boot): If your Imager supports “Run a script”, you may paste the following to prefill WMATA key and geocode your address; otherwise skip to the manual apt + setup.sh flow above:
    ```bash
    #!/usr/bin/env bash
    set -euo pipefail

@@ -378,35 +378,82 @@ If Bookworm issues on Zero W
 
 ---
 
-One‑Shot Setup
---------------
+Install Options
+---------------
 
-Quick start on Raspberry Pi (public repo)
-- In Raspberry Pi Imager Advanced options, set Wi‑Fi country, SSID, password, SSH, and paste this into “Run a script”:
+Easy (hands‑off)
+- In Raspberry Pi Imager Advanced options, set Wi‑Fi country, SSID, password, SSH, and paste this into “Run a script” (edit the first 3 vars):
   ```bash
   #!/usr/bin/env bash
-  set -e
-  sudo apt-get update
-  sudo apt-get install -y --no-install-recommends git ca-certificates
-  sudo -u pi git clone https://github.com/jamesdahall/metro_clock.git /home/pi/metro_clock || true
-  ```
-- After first boot: SSH in and finish install
-  - `cd /home/pi/metro_clock`
-  - Minimal deps only: `sudo ./update.sh --apt`
-  - Kiosk + services: `sudo ./update.sh --apt --kiosk --install-services --env WMATA_API_KEY=YOUR_KEY`
-  - Dev preview: `./dev.sh` then open `http://<pi>:8080/` (requires WMATA key for rail/bus)
+  set -euo pipefail
+  umask 027
+  exec > >(tee -a /var/log/firstboot-metro.log) 2>&1
+  set +x
 
-Configure API key and config
-- WMATA key (for live rail/bus/incidents): `sudo ./update.sh --env WMATA_API_KEY=YOUR_KEY`
-- Create a starter config: `./update.sh --write-config --home 38.8895,-77.0353 --radius 1200`
-  - Edit `config.yaml` to add favorites:
-    - `rail.favorites`: e.g., `[A01, C01]`
-    - `bus.favorites`: e.g., `[1001234, 1005678]`
-    - `bike_share.favorites`: e.g., `[312, 425]`
+  # EDIT THESE
+  WMATA_API_KEY="YOUR_REAL_KEY_HERE"
+  ADDRESS="123 Main St, Arlington, VA"
+  RADIUS_M="1200"
+
+  # Minimal packages to fetch code and geocode address
+  apt-get update
+  apt-get install -y --no-install-recommends git ca-certificates jq curl
+
+  # Prepare home and clone repo
+  install -d -m 0755 -o pi -g pi /home/pi
+  cd /home/pi
+  if [ ! -d metro_clock/.git ]; then
+    sudo -u pi git clone https://github.com/jamesdahall/metro_clock.git
+  fi
+  cd metro_clock
+
+  # Geocode the ADDRESS -> HOME_LAT/HOME_LON (single, polite Nominatim request)
+  HOME_LAT=""; HOME_LON=""
+  if [ -n "$ADDRESS" ]; then
+    GEO_JSON=$(curl -sS -A "metro-clock-firstboot/1.0" --get \
+      --data-urlencode "q=${ADDRESS}" \
+      --data-urlencode "format=json" \
+      --data-urlencode "limit=1" \
+      https://nominatim.openstreetmap.org/search || true)
+    HOME_LAT=$(echo "$GEO_JSON" | jq -r '.[0].lat // empty')
+    HOME_LON=$(echo "$GEO_JSON" | jq -r '.[0].lon // empty')
+  fi
+  : "${HOME_LAT:=38.8895}"
+  : "${HOME_LON:=-77.0353}"
+
+  # Write env file securely (avoid passing key on command line)
+  install -d -m 0755 /etc/default
+  cat > /etc/default/metro-clock <<EOF
+WMATA_API_KEY=${WMATA_API_KEY}
+HOST=127.0.0.1
+PORT=8080
+PYTHONPATH=/home/pi/metro_clock
+EOF
+  chmod 0640 /etc/default/metro-clock
+
+  # One-shot install: deps + kiosk + services + config + timers (no auto-pull)
+  ./update.sh --apt --kiosk --install-services \
+    --write-config --home "${HOME_LAT},${HOME_LON}" --radius "${RADIUS_M}"
+
+  # Clean up potential first-boot artifacts so secrets aren't left on /boot
+  rm -f /boot/firstrun.sh /boot/user-data 2>/dev/null || true
+  ```
+
+Recommended (interactive)
+- After first boot, SSH in and run:
+  - `cd /home/pi/metro_clock && sudo ./setup.sh`
+  - Follow prompts (installs deps, asks for WMATA key and address, installs services, configures sleep timers and weekly reboot).
+
+Advanced (optional)
+- Minimal deps only: `sudo ./update.sh --apt`
+- Install kiosk + services explicitly: `sudo ./update.sh --apt --kiosk --install-services --env WMATA_API_KEY=YOUR_KEY`
+- Configure only the API key: `sudo ./update.sh --env WMATA_API_KEY=YOUR_KEY`
+- Create/overwrite a starter config: `./update.sh --write-config --home 38.8895,-77.0353 --radius 1200`
+- Dev preview without services: `./dev.sh` then open `http://<pi>:8080/` (requires WMATA key)
 
 Environment and config
-- Env file: `/etc/default/metro-clock` (created by `update.sh --install-services`). Add `WMATA_API_KEY=...` and adjust `HOST/PORT` as needed.
-- App config: `config.yaml` is optional; auto-nearby selection works without favorites.
+- Env file: `/etc/default/metro-clock` (created by the installer). Holds `WMATA_API_KEY`, `HOST`, and `PORT`.
+- App config: `config.yaml` is optional; auto‑nearby selection works without favorites.
 
 Installer notes
-- `setup.sh` is an alias of `update.sh` for convenience. Prefer calling `update.sh` directly with flags.
+- `setup.sh` runs an interactive, one‑shot install. `update.sh` exposes the same steps via flags for advanced use.

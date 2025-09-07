@@ -66,11 +66,16 @@ as_root() {
 apt_install() {
   export DEBIAN_FRONTEND=noninteractive
   as_root apt-get update
-  local pkgs=(python3 python3-venv python3-pip git ca-certificates jq curl)
+  local pkgs=(python3 python3-venv python3-pip git ca-certificates jq curl unattended-upgrades)
   if [[ $APT_KIOSK -eq 1 ]]; then
     pkgs+=(xserver-xorg xinit chromium-browser unclutter fonts-noto-core fonts-noto-color-emoji)
   fi
   as_root apt-get install -y --no-install-recommends "${pkgs[@]}" || true
+  # Ensure unattended upgrades are enabled for security updates
+  as_root tee /etc/apt/apt.conf.d/20auto-upgrades >/dev/null <<'EOF'
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Unattended-Upgrade "1";
+EOF
 }
 
 write_env_file() {
@@ -110,7 +115,7 @@ install_services() {
   local svc_kiosk="metro-kiosk.service"
 
   # FastAPI backend
-  tee "${systemd_dir}/${svc_api}" >/dev/null <<EOF
+  as_root tee "${systemd_dir}/${svc_api}" >/dev/null <<EOF
 [Unit]
 Description=Metro Clock API (FastAPI)
 After=network-online.target
@@ -134,26 +139,139 @@ EOF
   if [[ ! -x "$chromium_bin" ]] && command -v chromium >/dev/null 2>&1; then
     chromium_bin="$(command -v chromium)"
   fi
-  tee "${systemd_dir}/${svc_kiosk}" >/dev/null <<EOF
+
+  # Kiosk wrapper (runs unclutter, then Chromium)
+  local bin_kiosk="/usr/local/bin/metro-kiosk.sh"
+  as_root tee "$bin_kiosk" >/dev/null <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+unclutter -idle 0 &
+exec ${chromium_bin} --kiosk --noerrdialogs --disable-translate --disable-features=TranslateUI --app=http://localhost:8080/
+EOF
+  as_root chmod +x "$bin_kiosk"
+
+  # Lean kiosk service using xinit on TTY1
+  as_root tee "${systemd_dir}/${svc_kiosk}" >/dev/null <<EOF
 [Unit]
-Description=Chromium Kiosk for Metro Clock
-After=graphical.target ${svc_api}
+Description=Chromium Kiosk for Metro Clock (xinit)
+After=multi-user.target ${svc_api}
 Wants=${svc_api}
 
 [Service]
 User=${SUDO_USER:-${USER}}
-Environment=DISPLAY=:0
-ExecStart=/usr/bin/startx ${chromium_bin} --kiosk --noerrdialogs --disable-translate --disable-features=TranslateUI --app=http://localhost:8080/
+TTYPath=/dev/tty1
+StandardInput=tty
+TTYReset=yes
+TTYVHangup=yes
+ExecStart=/usr/bin/xinit ${bin_kiosk} -- :0 vt1 -keeptty
 Restart=always
 RestartSec=5
 
 [Install]
-WantedBy=graphical.target
+WantedBy=multi-user.target
+EOF
+
+  # Display power scripts and timers
+  local bin_off="/usr/local/bin/metro-display-off.sh"
+  local bin_on="/usr/local/bin/metro-display-on.sh"
+  as_root tee "$bin_off" >/dev/null <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+systemctl stop metro-kiosk.service || true
+if command -v vcgencmd >/dev/null 2>&1; then
+  vcgencmd display_power 0 || true
+fi
+EOF
+  as_root chmod +x "$bin_off"
+
+  as_root tee "$bin_on" >/dev/null <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if command -v vcgencmd >/dev/null 2>&1; then
+  vcgencmd display_power 1 || true
+fi
+systemctl start metro-kiosk.service || true
+EOF
+  as_root chmod +x "$bin_on"
+
+  as_root tee "${systemd_dir}/metro-display-off.service" >/dev/null <<EOF
+[Unit]
+Description=Turn display off for Metro Clock
+
+[Service]
+Type=oneshot
+ExecStart=${bin_off}
+EOF
+
+  as_root tee "${systemd_dir}/metro-display-on.service" >/dev/null <<EOF
+[Unit]
+Description=Turn display on for Metro Clock
+
+[Service]
+Type=oneshot
+ExecStart=${bin_on}
+EOF
+
+  as_root tee "${systemd_dir}/metro-display-off.timer" >/dev/null <<'EOF'
+[Unit]
+Description=Nightly display off for Metro Clock
+
+[Timer]
+OnCalendar=22:30
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
+  as_root tee "${systemd_dir}/metro-display-on.timer" >/dev/null <<'EOF'
+[Unit]
+Description=Morning display on for Metro Clock
+
+[Timer]
+OnCalendar=05:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
+  # Weekly reboot during off window (Sunday 03:30)
+  local bin_reboot="/usr/local/bin/metro-weekly-reboot.sh"
+  as_root tee "$bin_reboot" >/dev/null <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+systemctl stop metro-kiosk.service || true
+sleep 2
+systemctl reboot
+EOF
+  as_root chmod +x "$bin_reboot"
+
+  as_root tee "${systemd_dir}/metro-weekly-reboot.service" >/dev/null <<EOF
+[Unit]
+Description=Weekly maintenance reboot for Metro Clock
+
+[Service]
+Type=oneshot
+ExecStart=${bin_reboot}
+EOF
+
+  as_root tee "${systemd_dir}/metro-weekly-reboot.timer" >/dev/null <<'EOF'
+[Unit]
+Description=Weekly reboot timer for Metro Clock (Sun 03:30)
+
+[Timer]
+OnCalendar=Sun 03:30
+Persistent=true
+
+[Install]
+WantedBy=timers.target
 EOF
 
   as_root systemctl daemon-reload
   as_root systemctl enable "${svc_api}" "${svc_kiosk}" || true
-  echo "Installed services: ${svc_api}, ${svc_kiosk}"
+  as_root systemctl enable --now metro-display-off.timer metro-display-on.timer metro-weekly-reboot.timer || true
+  echo "Installed services: ${svc_api}, ${svc_kiosk}, display timers (22:30 off, 05:00 on), weekly reboot (Sun 03:30)"
 }
 
 write_config() {

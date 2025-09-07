@@ -1,0 +1,34 @@
+:root{color-scheme:dark}
+html,body{margin:0;padding:0;background:#0e0f12;color:#e9e9ef;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+#app{max-width:1920px;margin:0 auto;padding:0 16px 16px}
+header{position:fixed;top:8px;right:16px;display:flex;justify-content:flex-end;align-items:center;margin:0;z-index:10;pointer-events:none}
+#clock{display:flex;flex-direction:column;align-items:flex-end}
+#clock .hhmm{font-variant-numeric:tabular-nums;font-size:72px;line-height:0.9;color:#fff;font-weight:700;letter-spacing:2px;text-shadow:0 2px 6px rgba(0,0,0,0.35)}
+#clock .ss{font-variant-numeric:tabular-nums;font-size:18px;color:#bfc5cc}
+main{display:grid;grid-template-columns:2fr 2fr 1fr;gap:12px}
+section h2{font-size:16px;margin:0 0 6px 0;color:#9aa0a6}
+.rows{display:flex;flex-direction:column;gap:6px}
+.group-label{margin-top:4px;color:#9aa0a6;font-size:13px;border-top:1px solid #222;padding-top:6px}
+.row{display:grid;grid-template-columns:72px 1fr 64px;gap:8px;align-items:center;padding:8px 10px;background:#16181d;border-radius:8px}
+.badge{display:inline-block;padding:4px 8px;border-radius:999px;font-weight:600;font-size:12px;color:#111}
+.badge.RD{background:#bf0d3e}
+.badge.BL{background:#0072ce}
+.badge.OR{background:#ed8b00}
+.badge.SV{background:#a2a4a3}
+.badge.YL{background:#f7d117}
+.badge.GR{background:#00b259}
+.minutes{font-size:20px;font-variant-numeric:tabular-nums;color:#fff;text-align:right}
+aside#info{display:flex;flex-direction:column;gap:8px}
+.card{background:#16181d;border-radius:8px;padding:10px}
+.card h3{margin:0 0 6px 0;font-size:14px;color:#9aa0a6}
+.weather{display:flex;align-items:center;gap:10px}
+.weather .icon{font-size:64px; line-height:1}
+.weather .text{font-size:16px}
+.hourly{display:flex;gap:10px;margin-top:8px;overflow:hidden}
+.hour{display:flex;flex-direction:column;align-items:center;gap:2px;min-width:48px;color:#cfd3d8}
+.hour .hicon{font-size:22px}
+.hour .htemp{font-size:14px;font-weight:600;color:#fff}
+.hour .hpop{font-size:12px;color:#9aa0a6}
+.hour .hwhen{font-size:11px;color:#9aa0a6}
+.card#errors .text{color:#ff8080; font-size:12px; white-space:pre-wrap}
+footer{margin-top:12px;color:#9aa0a6;font-size:12px}

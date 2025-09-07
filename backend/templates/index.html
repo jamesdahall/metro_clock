@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Metro Clock</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header>
+        <div id="clock"><div class="hhmm">--:--</div><div class="ss">--</div></div>
+      </header>
+      <main>
+        <section id="rail"><h2>Rail</h2><div class="rows" id="rail-rows"></div></section>
+        <section id="bus"><h2>Bus</h2><div class="rows" id="bus-rows"></div></section>
+        <aside id="info">
+          <div class="card" id="weather"><h3>Weather</h3><div class="weather"><div class="icon"></div><div class="text"></div></div><div class="hourly" id="hourly"></div></div>
+          <div class="card" id="wx-alerts"><h3>Weather Alerts</h3><div class="text"></div></div>
+          <div class="card" id="incidents"><h3>Service Impacts</h3></div>
+          <div class="card" id="bike"><h3>Capital Bikeshare — bikes | docks</h3></div>
+          <div class="card" id="errors"><h3>Errors</h3><div class="text"></div></div>
+        </aside>
+      </main>
+      <footer>
+        <span id="updated"></span>
+      </footer>
+    </div>
+    <script src="/static/app.js"></script>
+  </body>
+  </html>

@@ -173,6 +173,10 @@ validate_wmata_key() {
 # Optional questionnaire: ask everything up front with validation
 if [[ $WIZARD -eq 1 ]]; then
   ensure_prompt_tools
+  # If invoked via a pipe (curl | sudo bash), stdin may not be a TTY. Reattach stdin to /dev/tty when available.
+  if [[ ! -t 0 && -r /dev/tty ]]; then
+    exec </dev/tty
+  fi
   echo "==> Interactive setup (wizard)"
   # Home coordinates
   while :; do

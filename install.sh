@@ -41,6 +41,8 @@ DO_APT=1
 APT_YES_FLAG=""
 WIZARD=0
 RUN_BACKGROUND=0
+LOG_FILE="/var/log/metro-install.log"
+EXPLICIT_LOG=0
 
 # Read a line from TTY (even when this script is piped via curl), with optional default
 prompt() {
@@ -86,6 +88,8 @@ while [[ $# -gt 0 ]]; do
       sed -n '1,120p' "$0" | sed 's/^# \{0,1\}//' | sed -n '1,80p'
       exit 0
       ;;
+    --log)
+      LOG_FILE="$2"; EXPLICIT_LOG=1; shift 2 ;;
     *) echo "Unknown argument: $1" >&2; exit 1 ;;
   esac
 done
@@ -97,6 +101,16 @@ TARGET_DIR="${TARGET_DIR:-${REAL_HOME}/metro_clock}"
 
 echo "==> Using user: $REAL_USER"
 echo "==> Install dir: $TARGET_DIR"
+
+# If backgrounding or explicit logging requested, tee installer output to log
+if [[ $RUN_BACKGROUND -eq 1 || $EXPLICIT_LOG -eq 1 ]]; then
+  mkdir -p "$(dirname "$LOG_FILE")" || true
+  : > "$LOG_FILE" || true
+  chmod 0644 "$LOG_FILE" || true
+  echo "==> Logging to $LOG_FILE"
+  # Redirect both stdout and stderr through tee for this foreground phase
+  exec > >(tee -a "$LOG_FILE") 2>&1
+fi
 
 apt_install_min() {
   export DEBIAN_FRONTEND=noninteractive
@@ -313,9 +327,9 @@ FLAGS+=("--write-config" "--home" "$HOME_COORDS" "--radius" "$RADIUS_M")
 
 echo "==> Running updater: ./update.sh ${FLAGS[*]}"
 if [[ $RUN_BACKGROUND -eq 1 ]]; then
-  LOG=/var/log/metro-install.log
+  LOG="$LOG_FILE"
   echo "==> Running in background. Logs: $LOG"
-  nohup ./update.sh "${FLAGS[@]}" > "$LOG" 2>&1 & disown
+  nohup ./update.sh "${FLAGS[@]}" >> "$LOG" 2>&1 & disown
   echo "PID: $!"
   echo "Tail logs: sudo tail -f $LOG"
 else

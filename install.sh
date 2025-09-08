@@ -42,6 +42,28 @@ APT_YES_FLAG=""
 WIZARD=0
 RUN_BACKGROUND=0
 
+# Read a line from TTY (even when this script is piped via curl), with optional default
+prompt() {
+  local msg="$1"; shift || true
+  local def="${1:-}"
+  local ans=""
+  if [[ -t 0 ]]; then
+    read -r -p "$msg" ans || ans=""
+  else
+    if [[ -r /dev/tty ]]; then
+      # shellcheck disable=SC2162
+      read -r -p "$msg" ans < /dev/tty || ans=""
+    else
+      ans=""
+    fi
+  fi
+  if [[ -z "$ans" && -n "$def" ]]; then
+    printf '%s' "$def"
+  else
+    printf '%s' "$ans"
+  fi
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --wmata-key) WMATA_API_KEY_DEFAULT="$2"; shift 2 ;;
@@ -154,7 +176,7 @@ if [[ $WIZARD -eq 1 ]]; then
   echo "==> Interactive setup (wizard)"
   # Home coordinates
   while :; do
-    read -r -p "Enter address to geocode OR 'lat,lon' (default ${HOME_COORDS:-38.8895,-77.0353}): " entry || entry=""
+    entry=$(prompt "Enter address to geocode OR 'lat,lon' (default ${HOME_COORDS:-38.8895,-77.0353}): " "${HOME_COORDS:-38.8895,-77.0353}")
     entry="${entry:-${HOME_COORDS:-38.8895,-77.0353}}"
     if [[ "$entry" =~ ^-?[0-9]+\.?[0-9]*,-?[0-9]+\.?[0-9]*$ ]]; then
       HOME_COORDS="$entry"; break
@@ -166,14 +188,14 @@ if [[ $WIZARD -eq 1 ]]; then
   done
   # Radius
   while :; do
-    read -r -p "Search radius meters [${RADIUS_M}]: " rm || rm=""
+    rm=$(prompt "Search radius meters [${RADIUS_M}]: " "$RADIUS_M")
     rm="${rm:-$RADIUS_M}"
     if [[ "$rm" =~ ^[0-9]{2,6}$ ]]; then RADIUS_M="$rm"; break; fi
     echo "Please enter a number (e.g., 1200)."
   done
   # API key
   while :; do
-    read -r -p "Enter WMATA_API_KEY (leave blank to skip): " WMATA_API_KEY_DEFAULT || WMATA_API_KEY_DEFAULT=""
+    WMATA_API_KEY_DEFAULT=$(prompt "Enter WMATA_API_KEY (leave blank to skip): ")
     if [[ -z "$WMATA_API_KEY_DEFAULT" ]]; then
       echo "Proceeding without a key; rail/bus will be unavailable until added."; break
     fi
@@ -184,9 +206,9 @@ if [[ $WIZARD -eq 1 ]]; then
     fi
   done
   # Kiosk/Services
-  read -r -p "Install kiosk dependencies (Chromium/Xorg/fonts/unclutter)? [y/N] " yn || yn=""
+  yn=$(prompt "Install kiosk dependencies (Chromium/Xorg/fonts/unclutter)? [y/N] " "N")
   case "${yn:-N}" in [Yy]*) INSTALL_KIOSK=1;; *) INSTALL_KIOSK=0;; esac
-  read -r -p "Install and enable systemd services (backend + kiosk)? [y/N] " yn || yn=""
+  yn=$(prompt "Install and enable systemd services (backend + kiosk)? [y/N] " "N")
   case "${yn:-N}" in [Yy]*) INSTALL_SERVICES=1;; *) INSTALL_SERVICES=0;; esac
 
   # Summary
@@ -197,7 +219,7 @@ if [[ $WIZARD -eq 1 ]]; then
   echo "WMATA key:    ${WMATA_API_KEY_DEFAULT:+****${WMATA_API_KEY_DEFAULT: -4}}${WMATA_API_KEY_DEFAULT:-<none>}"
   echo "Kiosk deps:   $([[ $INSTALL_KIOSK -eq 1 ]] && echo yes || echo no)"
   echo "Services:     $([[ $INSTALL_SERVICES -eq 1 ]] && echo yes || echo no)"
-  read -r -p "Proceed with installation? [Y/n] " yn || yn="Y"
+  yn=$(prompt "Proceed with installation? [Y/n] " "Y")
   case "${yn:-Y}" in [Yy]*) : ;; *) echo "Cancelled."; exit 0 ;; esac
 fi
 
@@ -236,7 +258,7 @@ if [[ -z "$HOME_COORDS" ]]; then
   if [[ -t 0 ]]; then
     echo "==> Home coordinates not set. Let's configure them."
     while :; do
-      read -r -p "Enter address to geocode OR 'lat,lon' (default 38.8895,-77.0353): " entry || entry=""
+      entry=$(prompt "Enter address to geocode OR 'lat,lon' (default 38.8895,-77.0353): " "38.8895,-77.0353")
       entry="${entry:-38.8895,-77.0353}"
       if [[ "$entry" =~ ^-?[0-9]+\.?[0-9]*,-?[0-9]+\.?[0-9]*$ ]]; then
         HOME_COORDS="$entry"

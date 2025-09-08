@@ -212,8 +212,8 @@ Single-Location Setup
 ---------------------
 
 - During initial setup, you can use the one‑liner installer (recommended) or run the interactive setup.
-  - One‑liner (see section "One‑Line Install (curl)")
-  - Interactive: `sudo ./setup.sh`
+  - One‑liner (see Install above)
+  - Interactive: `sudo ./update.sh` (guided)
 - Non-interactive alternative to create a starter config:
   - `./update.sh --write-config --home 38.8895,-77.0353 --radius 1200`
 - After that, the location remains fixed; only favorites might be edited when needed.
@@ -330,7 +330,7 @@ Interactive setup (recommended)
   4) Show nearest bikeshare docks; pick 1–3.
   5) Confirm and write config; radius lookups are then disabled unless you re-run setup.
 - Fallback auto mode: If you skip picking, we auto-select by radius + top N so the display still works immediately.
-- Re-run anytime: `sudo ./setup.sh` to adjust selections later.
+- Re-run anytime: `sudo ./update.sh` to adjust selections later.
 
 Recommendation
 - Use interactive setup to lock favorites for this one location. It reduces API calls, avoids noisy bus stops, and yields a cleaner dashboard. Keep radius auto-selection available as a quick-start or fallback.
@@ -357,7 +357,7 @@ Environment and config
 
 Installer notes
 ---------------
-- Recommended: curl‑based `install.sh` with `--wizard`. `setup.sh` (interactive) and `update.sh` (flags) remain for advanced use.
+- Recommended: curl‑based `install.sh` with `--wizard`. `update.sh` (interactive with no flags, or via flags) remains for advanced use.
 
 Planned Features
 ----------------

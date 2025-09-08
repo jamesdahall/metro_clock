@@ -40,16 +40,19 @@ Recommended, minimal-typing installation on Raspberry Pi OS Lite:
 
 1) Ensure Wi‑Fi country is set (unblocks Wi‑Fi):
    - `sudo raspi-config nonint do_wifi_country US` (adjust country code)
-2) Run the one‑line installer (wizard prompts for address/home and validates API key):
-   - `curl -fsSL https://raw.githubusercontent.com/jamesdahall/metro_clock/main/install.sh | sudo bash -s -- --wizard --full`
+2) Download the installer and run it (interactive wizard with validation):
+   - `curl -fsSLO https://raw.githubusercontent.com/jamesdahall/metro_clock/main/install.sh`
+   - `sudo bash install.sh --wizard --full --log /var/log/metro-install.log`
 3) After install completes:
    - Open `http://<pi-ip>:8080/` in a browser (Chromium kiosk is installed if selected)
    - Check services: `systemctl status metro-clock.service metro-kiosk.service`
 
 Notes
 - `--wizard` asks all questions up front with validation; `--full` installs kiosk + services non‑interactively.
-- To run installation in background after confirming, add `--bg` and tail `/var/log/metro-install.log`.
-- You can also supply non‑interactive flags: `--wmata-key 'YOUR_KEY' --home 38.8895,-77.0353 --radius 1200 --full`.
+- Add `--bg` to continue in the background after confirming; tail `/var/log/metro-install.log`.
+- Non‑interactive one‑liner (no prompts):
+  - `curl -fsSL https://raw.githubusercontent.com/jamesdahall/metro_clock/main/install.sh | sudo bash -s -- --wmata-key 'YOUR_KEY' --home 38.8895,-77.0353 --radius 1200 --full --log /var/log/metro-install.log`
+  - For interactive installs, the two‑step method above is recommended for reliable TTY prompts.
 
 ---
 
@@ -211,9 +214,9 @@ Post‑install tips
 Single-Location Setup
 ---------------------
 
-- During initial setup, you can use the one‑liner installer (recommended) or run the interactive setup.
-  - One‑liner (see Install above)
-  - Interactive: `sudo ./update.sh` (guided)
+- During initial setup, use the curl installer (two‑step, recommended) or run the in‑repo interactive setup.
+  - Two‑step curl installer (see Install above)
+  - In‑repo interactive: `sudo ./update.sh` (guided)
 - Non-interactive alternative to create a starter config:
   - `./update.sh --write-config --home 38.8895,-77.0353 --radius 1200`
 - After that, the location remains fixed; only favorites might be edited when needed.

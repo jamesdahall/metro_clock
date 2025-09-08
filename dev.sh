@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Dev server for local testing (real by default; use MOCK=1 to force mocks).
+# Dev server for local testing (uses real APIs; no mock mode).
 DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$DIR"
 

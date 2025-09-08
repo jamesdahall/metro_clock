@@ -5,6 +5,54 @@ A lightweight, kiosk-style dashboard showing WMATA rail and bus arrivals, Capita
 
 ---
 
+Table of Contents
+-----------------
+
+- Install (curl)
+- Goals
+- Features
+- Architecture
+- WMATA API Overview
+- Capital Bikeshare (GBFS)
+- Data Model (backend)
+- UI Design Notes (1080p)
+- Deployment (Pi Zero W)
+- Single-Location Setup
+- Configuration (config.yaml)
+- Open‑Meteo API (Weather)
+- Resilience & Rate Limiting
+- Security & Privacy
+- Future Enhancements
+- Minimal Implementation Plan
+- Radius Selection vs. Interactive Setup
+- Local Development (optional)
+- Environment and config
+- Installer notes
+- Planned Features
+- Troubleshooting
+
+---
+
+Install (curl)
+--------------
+
+Recommended, minimal-typing installation on Raspberry Pi OS Lite:
+
+1) Ensure Wi‑Fi country is set (unblocks Wi‑Fi):
+   - `sudo raspi-config nonint do_wifi_country US` (adjust country code)
+2) Run the one‑line installer (wizard prompts for address/home and validates API key):
+   - `curl -fsSL https://raw.githubusercontent.com/jamesdahall/metro_clock/main/install.sh | sudo bash -s -- --wizard --full`
+3) After install completes:
+   - Open `http://<pi-ip>:8080/` in a browser (Chromium kiosk is installed if selected)
+   - Check services: `systemctl status metro-clock.service metro-kiosk.service`
+
+Notes
+- `--wizard` asks all questions up front with validation; `--full` installs kiosk + services non‑interactively.
+- To run installation in background after confirming, add `--bg` and tail `/var/log/metro-install.log`.
+- You can also supply non‑interactive flags: `--wmata-key 'YOUR_KEY' --home 38.8895,-77.0353 --radius 1200 --full`.
+
+---
+
 Goals
 -----
 
@@ -24,13 +72,10 @@ Features
 - Nearby stations/stops: Select nearest rail stations and bus stops from configured home location.
 - Rail predictions: Line, destination, minutes, platform, car count; color-coded by line.
 - Bus predictions: Route, destination, minutes; grouping by stop.
-- Service impacts: Prominent panel for WMATA incidents/disruptions (rail and bus), severity-tagged.
-- Bikeshare counts: Capital Bikeshare dock status (bikes and docks available) via GBFS feeds.
+- Service impacts: Prominent panel for WMATA incidents/disruptions (rail and bus).
 - Bikeshare counts: Capital Bikeshare dock status via GBFS (bikes, docks, and e-bikes when available).
 - Clock and weather: Always-visible clock; current conditions + short summary via Open‑Meteo.
-- Favorites & filters: Pin specific stations/stops/routes/lines; radius-based auto-selection optional.
-- Rotating views (optional): Cycle expanded panels; default remains simultaneous combined view.
-- Offline/poor network mode: Use last-known predictions with staleness badges and age indicator.
+- Favorites & filters: Pin specific stations/stops; radius-based auto-selection optional. Route/line filters planned.
 - Performance-aware UI: Large fonts, dark theme, low reflow; 1080p-optimized.
 - Auto start: Boots into Chromium kiosk; watchdog restarts on crash.
 
@@ -41,7 +86,7 @@ Architecture
 
 - Backend: Python (FastAPI or Flask) service on the Pi
   - Fetches WMATA data on a short interval (e.g., every 10–20s), caches in memory.
-  - Exposes a tiny REST or Server-Sent Events (SSE) endpoint to the frontend.
+  - Exposes a tiny REST endpoint to the frontend (SSE planned as an optional enhancement).
   - Handles rate-limits, retries, and backoff; consolidates/massages data.
   - Optional SQLite for static reference data (station/stop metadata) and durable cache.
 - Integrations: Lightweight HTTP clients using `httpx`
@@ -49,7 +94,7 @@ Architecture
   - Capital Bikeshare GBFS (station information/status) for live bike/dock counts.
   - Open‑Meteo weather API for current conditions (no API key required).
 - Frontend: Minimal static page with vanilla JS
-  - Polls backend JSON or subscribes to SSE for live updates.
+  - Polls backend JSON for live updates (SSE planned).
   - Renders a compact grid for rail and bus side-by-side; bikeshare and weather panels.
   - No heavy frameworks; zero build step by default.
 - Config: YAML file (e.g., `config.yaml`)
@@ -117,7 +162,7 @@ Data Model (backend)
   - `/v1/summary`: combined, trimmed to configured favorites/nearby.
   - `/v1/incidents`: current disruptions.
   - `/v1/config`: public-safe subset for the UI.
-  - SSE alternative: `/v1/stream` pushing `summary` every N seconds.
+  - (Planned) SSE alternative: `/v1/stream` pushing `summary` every N seconds.
 
 ---
 
@@ -139,72 +184,39 @@ Note: Dark theme is the only theme and is baked-in for readability and simplicit
 
 ---
 
-Development Workflow (on Pi 4)
--------------------------------
+Local Development (optional)
+---------------------------
 
-1) Prepare environment
-- Python 3.11+ and `pip`.
-- Create venv: `python3 -m venv .venv && source .venv/bin/activate`.
-- Install: `pip install fastapi uvicorn pyyaml httpx jinja2`.
+For contributors. End‑users should use the curl installer above.
 
-2) Scaffold project (proposed layout)
-
-```
-metro_clock/
-  backend/
-    app.py            # FastAPI app; endpoints & SSE
-    wmata.py          # Clients and DTOs
-    cache.py          # Caching and schedulers
-    config.py         # YAML loader & validation
-    models.py         # Pydantic models
-    templates/
-      index.html      # Minimal UI shell
-    static/
-      app.js          # Polls/SSE + rendering
-      styles.css      # High-contrast responsive styles
-  config.yaml         # User config (gitignored)
-  README.md           # This document
-```
-
-3) Run backend locally
-- `export WMATA_API_KEY=...`
-- `uvicorn backend.app:app --reload --host 0.0.0.0 --port 8080`
-- Open `http://<pi4-ip>:8080/` to view the UI.
-
-4) Test with mocked data
-- Add a `MOCK=1` env flag to serve fixtures when the API key is absent.
-- Unit tests for `wmata.py` transforms; snapshot tests for UI rendering logic.
+- Prepare: `python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt`
+- Run: `export WMATA_API_KEY=... && ./dev.sh`
+- Open: `http://<device-ip>:8080/`
+- Testing: Use live data or add local fixtures.
 
 ---
 
 Deployment (Pi Zero W)
 ----------------------
 
-1) OS setup
-- Set Wi‑Fi country with `raspi-config`; enable auto-login to console; set GPU memory to 64MB.
-- Install packages: `sudo apt install --no-install-recommends xserver-xorg xinit chromium-browser unclutter`.
+The curl installer sets up systemd services and kiosk mode for you when `--full` is used. Manual deployment steps are no longer required.
 
-2) Backend service
-- Install Python deps (same as dev) in a venv under `/opt/metro_clock`.
-- Create `systemd` service `metro-clock.service` to run `uvicorn` at boot.
-
-3) Kiosk service
-- Create script to start X and Chromium in kiosk:
-  - `startx /usr/bin/chromium-browser --kiosk --noerrdialogs --disable-translate --disable-features=TranslateUI --app=http://localhost:8080/`
-- Hide cursor with `unclutter -idle 0`.
-- Create `systemd` service `kiosk.service` that `After=metro-clock.service`.
-
-4) Logging & watchdog
-- Journal limits and logrotate; optional `Restart=always` on both services.
+Post‑install tips
+- Start/stop services: `sudo systemctl start|stop metro-clock.service metro-kiosk.service`
+- Enable at boot: handled by installer; verify with `systemctl is-enabled ...`
+- Display timers and weekly reboot are installed by default; see `update.sh` for schedules.
 
 ---
 
 Single-Location Setup
 ---------------------
 
-- During initial setup, run a one-time helper to set home coordinates and write the config.
-  - Example: `python -m backend.setup --home 38.8895,-77.0353 --radius 1200`
-- After that, the location remains fixed; only favorites/filters might be edited when needed.
+- During initial setup, you can use the one‑liner installer (recommended) or run the interactive setup.
+  - One‑liner (see section "One‑Line Install (curl)")
+  - Interactive: `sudo ./setup.sh`
+- Non-interactive alternative to create a starter config:
+  - `./update.sh --write-config --home 38.8895,-77.0353 --radius 1200`
+- After that, the location remains fixed; only favorites might be edited when needed.
 
 Configuration (`config.yaml`)
 -----------------------------
@@ -245,6 +257,7 @@ ui:
 - Omit `favorites` to select by nearest within `radius_m` (rail/bus) or `bike_share.radius_m` (bikeshare).
 - `WMATA_API_KEY` provided via env; do not commit to Git.
 - Weather via Open‑Meteo requires no API key. Use the home lat/lon.
+ - Note: `rail.lines` and `bus.routes` are planned filters; current implementation prioritizes favorites/nearby selection.
 
 Open‑Meteo API (Weather)
 ------------------------
@@ -292,7 +305,7 @@ Minimal Implementation Plan
 1) Implement `config.py`, `wmata.py` (rail/bus) with caching.
 2) Add `bikeshare.py` (GBFS) and `weather.py` (Open‑Meteo) clients.
 3) Build `/v1/summary` combining rail, bus, bike, incidents, and weather.
-4) Serve `index.html`, `styles.css`, `app.js` with combined 1080p layout and polling/SSE.
+4) Serve `index.html`, `styles.css`, `app.js` with combined 1080p layout and JSON polling (SSE planned).
 5) Add kiosk/systemd units, setup helper, and sample `config.yaml`.
 6) Polish UI for contrast, staleness, impacts panel, and low-CPU updates.
 
@@ -303,12 +316,11 @@ Radius Selection vs. Interactive Setup
 
 How radius lookup works
 - Data sources: We maintain local, cached metadata with coordinates for:
-  - Rail stations (WMATA Stations API; includes `StationTogether` grouping).
+- Rail stations (WMATA Stations API).
   - Bus stops (WMATA GTFS static `stops.txt` cached locally; avoids heavy API scans).
   - Bikeshare stations (Capital Bikeshare GBFS `station_information.json`).
 - Distance: Compute great-circle distance from the configured home lat/lon using Haversine (fast enough at this scale). For performance on the Pi Zero, we can use an equirectangular approximation and only switch to Haversine for the top K candidates.
 - Selection: Filter by a configurable radius per mode (rail/bus/bikeshare), then sort by distance and take top N (e.g., 2 rail stations, 6–8 bus stops, 2–3 bikeshare docks). Bus stops can be dense; we optionally group by route and direction to avoid clutter.
-- Grouping: For rail, use `StationTogether` to merge platforms at the same physical location (e.g., different line codes) into one logical station for display.
 
 Interactive setup (recommended)
 - One-time guided selection that writes `config.yaml` and avoids runtime auto-discovery:
@@ -318,221 +330,52 @@ Interactive setup (recommended)
   4) Show nearest bikeshare docks; pick 1–3.
   5) Confirm and write config; radius lookups are then disabled unless you re-run setup.
 - Fallback auto mode: If you skip picking, we auto-select by radius + top N so the display still works immediately.
-- Re-run anytime: `python -m backend.setup --reconfigure` to adjust selections later.
+- Re-run anytime: `sudo ./setup.sh` to adjust selections later.
 
 Recommendation
 - Use interactive setup to lock favorites for this one location. It reduces API calls, avoids noisy bus stops, and yields a cleaner dashboard. Keep radius auto-selection available as a quick-start or fallback.
 
 ---
 
-Next Steps (here)
------------------
+ 
 
-- If you want, I can scaffold the backend (FastAPI), add the static UI shell, and include systemd unit templates next. Then we can iterate on the data transforms and UI layout with mocked data before hitting WMATA’s API.
-
----
-
-Headless Install (OS Image + First Boot)
-----------------------------------------
-
-Recommended image
-- Raspberry Pi Zero W (production target): `Raspberry Pi OS Lite (32-bit) – Bookworm` (armhf). Stable, minimal, and supported on ARMv6.
-- Raspberry Pi 4 (dev box): `Raspberry Pi OS Lite (64-bit) – Bookworm` (aarch64) or keep parity with 32-bit Lite if you prefer identical environments.
-
-Flash with Raspberry Pi Imager
-- Use Raspberry Pi Imager on your laptop.
-  - Choose OS: as above (Lite/Bookworm).
-  - Choose Storage: your SD card.
-  - Click the gear (Advanced options) and set:
-    - Hostname: `metro-clock`
-    - Enable SSH: use password or SSH key
-    - Configure Wi‑Fi: SSID, password, and Wi‑Fi country (critical to avoid `rfkill` block)
-    - Locale: set timezone and keyboard
-  - Write the image. Eject the card.
-
-Manual headless (if not using Advanced options)
-- After flashing, re-mount the `boot` partition and create:
-  - `ssh` (empty file) to enable SSH
-  - `wpa_supplicant.conf` with:
-    ```
-    country=US
-    ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev
-    update_config=1
-
-    network={
-      ssid="YourSSID"
-      psk="YourPassword"
-      key_mgmt=WPA-PSK
-    }
-    ```
-  - Replace `country`, `ssid`, and `psk` accordingly. This sets Wi‑Fi country to avoid `rfkill`.
-
-First boot
-- Power on; find the IP from your router or `raspberrypi.local`/`metro-clock.local`.
-- SSH in: `ssh pi@metro-clock.local` (default user is `pi` on Bookworm; set via Imager if needed).
-- Verify Wi‑Fi country (if needed): `sudo raspi-config nonint do_wifi_country US`.
-- Update base: `sudo apt update && sudo apt full-upgrade -y`.
-
-If Bookworm issues on Zero W
-- Rarely, an older Zero W may have better behavior with `Raspberry Pi OS Lite (Legacy) – Bullseye (32-bit)`; only fall back if you hit graphics or Chromium packaging issues.
-
----
+<!-- Headless image preparation details removed to reduce confusion; use Raspberry Pi Imager defaults and ensure Wi‑Fi country is set, then run the curl installer. -->
 
 Install Options
 ---------------
 
-Easy (hands‑off) — when Imager supports “Run a script”
-- If your Raspberry Pi Imager offers Advanced → “Run a script”, you can paste this at image time (edit the first 3 vars):
-  ```bash
-  #!/usr/bin/env bash
-  set -euo pipefail
-  umask 027
-  exec > >(tee -a /var/log/firstboot-metro.log) 2>&1
-  set +x
-
-  # EDIT THESE
-  WMATA_API_KEY="YOUR_REAL_KEY_HERE"
-  ADDRESS="123 Main St, Arlington, VA"
-  RADIUS_M="1200"
-
-  # Minimal packages to fetch code and geocode address
-  apt-get update
-  apt-get install -y --no-install-recommends git ca-certificates jq curl
-
-  # Prepare home and clone repo
-  install -d -m 0755 -o pi -g pi /home/pi
-  cd /home/pi
-  if [ ! -d metro_clock/.git ]; then
-    sudo -u pi git clone https://github.com/jamesdahall/metro_clock.git
-  fi
-  cd metro_clock
-
-  # Geocode the ADDRESS -> HOME_LAT/HOME_LON (single, polite Nominatim request)
-  HOME_LAT=""; HOME_LON=""
-  if [ -n "$ADDRESS" ]; then
-    GEO_JSON=$(curl -sS -A "metro-clock-firstboot/1.0" --get \
-      --data-urlencode "q=${ADDRESS}" \
-      --data-urlencode "format=json" \
-      --data-urlencode "limit=1" \
-      https://nominatim.openstreetmap.org/search || true)
-    HOME_LAT=$(echo "$GEO_JSON" | jq -r '.[0].lat // empty')
-    HOME_LON=$(echo "$GEO_JSON" | jq -r '.[0].lon // empty')
-  fi
-  : "${HOME_LAT:=38.8895}"
-  : "${HOME_LON:=-77.0353}"
-
-  # Write env file securely (avoid passing key on command line)
-  install -d -m 0755 /etc/default
-  cat > /etc/default/metro-clock <<EOF
-WMATA_API_KEY=${WMATA_API_KEY}
-HOST=127.0.0.1
-PORT=8080
-PYTHONPATH=/home/pi/metro_clock
-EOF
-  chmod 0640 /etc/default/metro-clock
-
-  # One-shot install: deps + kiosk + services + config + timers (no auto-pull)
-  ./update.sh --apt --kiosk --install-services \
-    --write-config --home "${HOME_LAT},${HOME_LON}" --radius "${RADIUS_M}"
-
-  # Clean up potential first-boot artifacts so secrets aren't left on /boot
-  rm -f /boot/firstrun.sh /boot/user-data 2>/dev/null || true
-  ```
-
-No “Run a script” available? (Use this instead)
-- After first boot, SSH in and run these two blocks — the first installs all required apt packages, the second clones and runs the guided installer:
-  ```bash
-  # 1) Install required packages on a slim Pi OS
-  sudo apt-get update
-  sudo apt-get install -y --no-install-recommends \
-    git ca-certificates curl jq \
-    python3 python3-venv python3-pip \
-    xserver-xorg xinit unclutter \
-    fonts-noto-core fonts-noto-color-emoji \
-    libraspberrypi-bin unattended-upgrades
-  # Chromium package differs across releases
-  sudo apt-get install -y chromium-browser || sudo apt-get install -y chromium || true
-  # Enable unattended security upgrades
-  sudo tee /etc/apt/apt.conf.d/20auto-upgrades >/dev/null <<'EOF'
-APT::Periodic::Update-Package-Lists "1";
-APT::Periodic::Unattended-Upgrade "1";
-EOF
-
-  # 2) Clone and run the one-shot installer
-  cd /home/pi
-  [ -d metro_clock/.git ] || { [ -d metro_clock ] && mv metro_clock metro_clock.bak.$(date +%s) || true; }
-  sudo -u pi git clone https://github.com/jamesdahall/metro_clock.git
-  cd metro_clock
-  sudo ./setup.sh
-  ```
-
-Recommended (interactive)
-- After first boot, SSH in and run:
-  - `cd /home/pi/metro_clock && sudo ./setup.sh`
-  - Follow prompts (installs deps, asks for WMATA key and address, installs services, configures sleep timers and weekly reboot).
- - Raspberry Pi Imager setup (optional, before first boot): If your Imager supports “Run a script”, you may paste the following to prefill WMATA key and geocode your address; otherwise skip to the manual apt + setup.sh flow above:
-   ```bash
-   #!/usr/bin/env bash
-   set -euo pipefail
-   umask 027
-   exec > >(tee -a /var/log/firstboot-metro.log) 2>&1
-   set +x
-
-   # EDIT THESE (prefill; setup.sh will still run interactively later if you choose)
-   WMATA_API_KEY="YOUR_REAL_KEY_HERE"
-   ADDRESS="123 Main St, Arlington, VA"
-   RADIUS_M="1200"
-
-   apt-get update
-   apt-get install -y --no-install-recommends git ca-certificates jq curl
-
-   install -d -m 0755 -o pi -g pi /home/pi
-   cd /home/pi
-   if [ ! -d metro_clock/.git ]; then
-     sudo -u pi git clone https://github.com/jamesdahall/metro_clock.git
-   fi
-   cd metro_clock
-
-   # Geocode to seed config
-   HOME_LAT=""; HOME_LON=""
-   if [ -n "$ADDRESS" ]; then
-     GEO_JSON=$(curl -sS -A "metro-clock-firstboot/1.0" --get \
-       --data-urlencode "q=${ADDRESS}" \
-       --data-urlencode "format=json" \
-       --data-urlencode "limit=1" \
-       https://nominatim.openstreetmap.org/search || true)
-     HOME_LAT=$(echo "$GEO_JSON" | jq -r '.[0].lat // empty')
-     HOME_LON=$(echo "$GEO_JSON" | jq -r '.[0].lon // empty')
-   fi
-   : "${HOME_LAT:=38.8895}"; : "${HOME_LON:=-77.0353}"
-
-   # Write env securely
-   install -d -m 0755 /etc/default
-   cat > /etc/default/metro-clock <<EOF
-WMATA_API_KEY=${WMATA_API_KEY}
-HOST=127.0.0.1
-PORT=8080
-PYTHONPATH=/home/pi/metro_clock
-EOF
-   chmod 0640 /etc/default/metro-clock
-
-   # Pre-install minimal deps so setup.sh runs smoothly
-   ./update.sh --apt
-
-   # Cleanup common first-boot artifacts
-   rm -f /boot/firstrun.sh /boot/user-data 2>/dev/null || true
-   ```
-
-Advanced (optional)
-- Minimal deps only: `sudo ./update.sh --apt`
-- Install kiosk + services explicitly: `sudo ./update.sh --apt --kiosk --install-services --env WMATA_API_KEY=YOUR_KEY`
-- Configure only the API key: `sudo ./update.sh --env WMATA_API_KEY=YOUR_KEY`
-- Create/overwrite a starter config: `./update.sh --write-config --home 38.8895,-77.0353 --radius 1200`
-- Dev preview without services: `./dev.sh` then open `http://<pi>:8080/` (requires WMATA key)
+Use the curl installer flags to tailor behavior:
+- `--wizard`: Ask all questions up front with validation.
+- `--full`: Install minimal deps, kiosk, and services (non‑interactive apt).
+- `--kiosk-services`: Equivalent to `--kiosk --services`.
+- `--bg`: Run install in background after confirmation; logs at `/var/log/metro-install.log`.
 
 Environment and config
+----------------------
 - Env file: `/etc/default/metro-clock` (created by the installer). Holds `WMATA_API_KEY`, `HOST`, and `PORT`.
 - App config: `config.yaml` is optional; auto‑nearby selection works without favorites.
 
 Installer notes
-- `setup.sh` runs an interactive, one‑shot install. `update.sh` exposes the same steps via flags for advanced use.
+---------------
+- Recommended: curl‑based `install.sh` with `--wizard`. `setup.sh` (interactive) and `update.sh` (flags) remain for advanced use.
+
+Planned Features
+----------------
+
+- Offline/poor network mode with last‑known predictions, staleness badges, and age indicator.
+- Retry/backoff strategy with cohort polling alignment (e.g., 10s boundaries).
+- Server‑Sent Events (SSE) stream endpoint as an alternative to polling.
+- Enforce route and line filters in backend transforms (rail/bus).
+- Background refreshers to update caches outside the request path.
+- UI performance improvements (requestAnimationFrame batching and minimal DOM diffs).
+
+
+Troubleshooting
+---------------
+
+- Wi‑Fi blocked by rfkill: Set Wi‑Fi country once, then reboot.
+  - `sudo raspi-config nonint do_wifi_country US`
+- WMATA 401/403 errors: Ensure `WMATA_API_KEY` is set and valid in the environment or `/etc/default/metro-clock`.
+- Chromium package name differs: Some releases use `chromium` instead of `chromium-browser`. The installer auto-detects.
+- Blank data panels: Without an API key, rail/bus calls fail; weather and bikeshare should still populate.
+- Slow Zero W performance: Prefer polling every 10–20s; keep the UI open in kiosk only.

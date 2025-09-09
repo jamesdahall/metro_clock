@@ -266,7 +266,7 @@ TTYPath=/dev/tty1
 StandardInput=tty
 TTYReset=yes
 TTYVHangup=yes
-ExecStart=/usr/bin/xinit ${user_home}/.xinitrc -- :0 vt1 -keeptty
+ExecStart=/usr/bin/xinit ${user_home}/.xinitrc -- :0 vt1 -keeptty -s 0 -dpms
 Restart=always
 RestartSec=5
 

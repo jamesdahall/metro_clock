@@ -33,26 +33,29 @@ Table of Contents
 
 ---
 
-Install (curl)
---------------
+Install (clean image)
+---------------------
 
-Recommended, minimal-typing installation on Raspberry Pi OS Lite:
+Recommended, minimal-typing install on Raspberry Pi OS Lite (Bookworm):
 
-1) Ensure Wi‑Fi country is set (unblocks Wi‑Fi):
-   - `sudo raspi-config nonint do_wifi_country US` (adjust country code)
-2) Download the installer and run it (interactive wizard with validation):
-   - `curl -fsSLO https://raw.githubusercontent.com/jamesdahall/metro_clock/main/install.sh`
-   - `sudo bash install.sh --wizard --full --log /var/log/metro-install.log`
-3) After install completes:
-   - Open `http://<pi-ip>:8080/` in a browser (Chromium kiosk is installed if selected)
-   - Check services: `systemctl status metro-clock.service metro-kiosk.service`
+1) Prep the OS
+   - Set Wi‑Fi country (unblocks Wi‑Fi): `sudo raspi-config nonint do_wifi_country US`
+   - Update apt: `sudo apt-get update`
+
+2) Get the code and run the updater
+   - `git clone https://github.com/jamesdahall/metro_clock.git && cd metro_clock`
+   - `sudo ./update.sh --apt --kiosk --install-services --env WMATA_API_KEY=YOUR_KEY`
+
+3) Verify
+   - Backend: `systemctl status metro-clock.service` (listens on 127.0.0.1:8080)
+   - Kiosk: `systemctl status metro-kiosk.service` (starts X on TTY1)
+   - For remote testing: set `HOST=0.0.0.0` in `/etc/default/metro-clock` and visit `http://<pi-ip>:8080/`.
 
 Notes
-- `--wizard` asks all questions up front with validation; `--full` installs kiosk + services non‑interactively.
-- Add `--bg` to continue in the background after confirming; tail `/var/log/metro-install.log`.
-- Non‑interactive one‑liner (no prompts):
-  - `curl -fsSL https://raw.githubusercontent.com/jamesdahall/metro_clock/main/install.sh | sudo bash -s -- --wmata-key 'YOUR_KEY' --home 38.8895,-77.0353 --radius 1200 --full --log /var/log/metro-install.log`
-  - For interactive installs, the two‑step method above is recommended for reliable TTY prompts.
+- On Pi Zero W (ARMv6), Chromium requires NEON and won’t run. The installer auto‑selects `surf` and launches it via a robust `.xinitrc` session with `matchbox-window-manager`.
+- On Pi 3/4/Zero 2 (ARMv7+), Chromium is used by default; override with `--browser surf` if preferred.
+- The kiosk uses `xinit` + `.xinitrc` by default; switch to a simple wrapper with `--kiosk-session wrapper` if you really need it.
+- Xorg permissions are configured (`/etc/Xwrapper.config`), and `getty@tty1` is disabled to avoid TTY contention.
 
 ---
 
@@ -382,3 +385,6 @@ Troubleshooting
 - Chromium package name differs: Some releases use `chromium` instead of `chromium-browser`. The installer auto-detects.
 - Blank data panels: Without an API key, rail/bus calls fail; weather and bikeshare should still populate.
 - Slow Zero W performance: Prefer polling every 10–20s; keep the UI open in kiosk only.
+- Pi Zero W + Chromium: Current Chromium requires NEON and won’t run on ARMv6. The installer auto‑selects `surf` on ARMv6.
+- Kiosk shows blank screen but processes are running: Try a safer mode first (1280×720@60). The default `.xinitrc` asserts this; you can switch to 1080p30 by adding `xrandr --output HDMI-1 --mode 1920x1080 --rate 30` inside `~/.xinitrc`.
+- Xorg permissions / TTY contention: Ensure `/etc/Xwrapper.config` contains `allowed_users=anybody`; disable `getty@tty1.service`.

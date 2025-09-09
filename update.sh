@@ -15,6 +15,8 @@ Usage: $0 [options]
   --home LAT,LON        Coordinates for config (used with --write-config)
   --radius N            Radius meters for nearby selection (config)
   --config PATH         Config path (default: ./config.yaml)
+  --browser NAME        Browser: auto|chromium|epiphany|surf|netsurf (default: auto)
+  --kiosk-session TYPE  xinitrc (default) or wrapper
   --pull                Pull latest git changes (skipped by default)
   -h, --help            Show this help
 
@@ -37,6 +39,13 @@ HOME_COORDS=""
 RADIUS_M="1200"
 CONFIG_PATH="config.yaml"
 DO_PULL=0
+# Preferred browser for kiosk (auto, chromium, epiphany, surf, netsurf)
+BROWSER_PREF="auto"
+# Kiosk session type: xinitrc (resilient default) or wrapper
+KIOSK_SESSION="xinitrc"
+
+# Detect architecture early
+ARCH="$(uname -m 2>/dev/null || echo unknown)"
 
 ARGS_COUNT=$#
 while [[ $# -gt 0 ]]; do
@@ -49,6 +58,8 @@ while [[ $# -gt 0 ]]; do
     --home) HOME_COORDS="$2"; shift 2 ;;
     --radius) RADIUS_M="$2"; shift 2 ;;
     --config) CONFIG_PATH="$2"; shift 2 ;;
+    --browser) BROWSER_PREF="$2"; shift 2 ;;
+    --kiosk-session) KIOSK_SESSION="$2"; shift 2 ;;
     --pull) DO_PULL=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage; exit 1 ;;
@@ -68,7 +79,16 @@ apt_install() {
   as_root apt-get update
   local pkgs=(python3 python3-venv python3-pip git ca-certificates jq curl unattended-upgrades)
   if [[ $APT_KIOSK -eq 1 ]]; then
-    pkgs+=(xserver-xorg xinit chromium-browser unclutter fonts-noto-core fonts-noto-color-emoji)
+    pkgs+=(xserver-xorg xinit xserver-xorg-legacy x11-xserver-utils unclutter fonts-noto-core fonts-noto-color-emoji)
+    # Choose browser packages based on requested preference or architecture
+    case "${BROWSER_PREF}:${ARCH}" in
+      chromium:*)         pkgs+=(chromium-browser) ;;
+      epiphany:*)         pkgs+=(epiphany-browser) ;;
+      auto:armv6l)        pkgs+=(surf) ;;
+      surf:*)             pkgs+=(surf) ;;
+      netsurf:*)          pkgs+=(netsurf-gtk) ;;
+      auto:*)             pkgs+=(chromium-browser) ;;
+    esac
   fi
   as_root apt-get install -y --no-install-recommends "${pkgs[@]}" || true
   # Ensure unattended upgrades are enabled for security updates
@@ -76,6 +96,24 @@ apt_install() {
 APT::Periodic::Update-Package-Lists "1";
 APT::Periodic::Unattended-Upgrade "1";
 EOF
+}
+
+# Configure Xorg to allow non-root user to start X on TTY1
+configure_xorg_legacy() {
+  if [[ $APT_KIOSK -eq 1 ]]; then
+    # Ensure package is present (best-effort)
+    as_root apt-get install -y --no-install-recommends xserver-xorg-legacy >/dev/null 2>&1 || true
+    local xw=/etc/Xwrapper.config
+    if [[ -f "$xw" ]]; then
+      if grep -q '^allowed_users=' "$xw"; then
+        as_root sed -i 's/^allowed_users=.*/allowed_users=anybody/' "$xw"
+      else
+        printf "allowed_users=anybody\n" | as_root tee -a "$xw" >/dev/null
+      fi
+    else
+      printf "allowed_users=anybody\nneeds_root_rights=yes\n" | as_root tee "$xw" >/dev/null
+    fi
+  fi
 }
 
 write_env_file() {
@@ -114,7 +152,9 @@ install_services() {
   local svc_api="metro-clock.service"
   local svc_kiosk="metro-kiosk.service"
 
-  # FastAPI backend
+  # FastAPI backend (preserve \${HOST}/\${PORT} for systemd env)
+  local LHOST='${HOST}'
+  local LPORT='${PORT}'
   as_root tee "${systemd_dir}/${svc_api}" >/dev/null <<EOF
 [Unit]
 Description=Metro Clock API (FastAPI)
@@ -124,7 +164,7 @@ Wants=network-online.target
 [Service]
 EnvironmentFile=${env_file}
 WorkingDirectory=${REPO_DIR}
-ExecStart=${REPO_DIR}/.venv/bin/uvicorn backend.app:app --host \\${HOST} --port \\${PORT}
+ExecStart=${REPO_DIR}/.venv/bin/uvicorn backend.app:app --host ${LHOST} --port ${LPORT}
 Restart=always
 RestartSec=2
 User=${SUDO_USER:-${USER}}
@@ -134,21 +174,84 @@ Group=${SUDO_USER:-${USER}}
 WantedBy=multi-user.target
 EOF
 
-  # Chromium kiosk (detect binary)
-  local chromium_bin="/usr/bin/chromium-browser"
-  if [[ ! -x "$chromium_bin" ]] && command -v chromium >/dev/null 2>&1; then
-    chromium_bin="$(command -v chromium)"
-  fi
+  # Determine kiosk browser and command
+  local browser_cmd=""
+  pick_browser() {
+    case "$BROWSER_PREF" in
+      chromium)
+        if command -v chromium-browser >/dev/null 2>&1; then echo "chromium-browser"; return; fi
+        if command -v chromium >/dev/null 2>&1; then echo "chromium"; return; fi
+        ;;
+      epiphany)
+        if command -v epiphany-browser >/dev/null 2>&1; then echo "epiphany-browser"; return; fi
+        ;;
+      surf)
+        if command -v surf >/dev/null 2>&1; then echo "surf"; return; fi
+        ;;
+      netsurf)
+        if command -v netsurf-gtk >/dev/null 2>&1; then echo "netsurf-gtk"; return; fi
+        ;;
+    esac
+    # Auto mode fallback: ARMv6 -> surf, else chromium
+    if [[ "$ARCH" == "armv6l" ]]; then
+      if command -v surf >/dev/null 2>&1; then echo "surf"; return; fi
+      if command -v epiphany-browser >/dev/null 2>&1; then echo "epiphany-browser"; return; fi
+    fi
+    if command -v chromium-browser >/dev/null 2>&1; then echo "chromium-browser"; return; fi
+    if command -v chromium >/dev/null 2>&1; then echo "chromium"; return; fi
+    if command -v epiphany-browser >/dev/null 2>&1; then echo "epiphany-browser"; return; fi
+    if command -v surf >/dev/null 2>&1; then echo "surf"; return; fi
+    if command -v netsurf-gtk >/dev/null 2>&1; then echo "netsurf-gtk"; return; fi
+    echo ""; return
+  }
+  browser_cmd="$(pick_browser)"
 
-  # Kiosk wrapper (runs unclutter, then Chromium)
-  local bin_kiosk="/usr/local/bin/metro-kiosk.sh"
-  as_root tee "$bin_kiosk" >/dev/null <<EOF
+  # Prepare kiosk session
+  local user_home="/home/${SUDO_USER:-${USER}}"
+  if [[ "$KIOSK_SESSION" == "xinitrc" ]]; then
+    as_root bash -lc "cat > '${user_home}/.xinitrc' <<'EOL'
+#!/bin/sh
+exec >/tmp/kiosk-x.log 2>&1
+set -x
+export DISPLAY=:0
+if command -v xset >/dev/null 2>&1; then xset s off -dpms || true; fi
+if command -v xsetroot >/dev/null 2>&1; then xsetroot -solid black || true; fi
+if command -v xrandr >/dev/null 2>&1; then xrandr --output HDMI-1 --mode 1280x720 --rate 60 || true; fi
+command -v matchbox-window-manager >/dev/null 2>&1 && matchbox-window-manager -use_titlebar no -use_cursor no &
+command -v unclutter >/dev/null 2>&1 && unclutter -idle 0 &
+sleep 1
+URL="http://localhost:8080/"
+BIN='${browser_cmd}'
+while true; do
+  case "$BIN" in
+    chromium-browser|chromium)
+      "$BIN" --kiosk --noerrdialogs --disable-translate --disable-features=TranslateUI --app="$URL" || true ;;
+    epiphany-browser)
+      "$BIN" --application-mode "$URL" || true ;;
+    surf)
+      "$BIN" -Fk "$URL" || true ;;
+    netsurf-gtk)
+      "$BIN" "$URL" || true ;;
+    *) echo "No supported browser found: $BIN" >&2; sleep 5 ;;
+  esac
+  sleep 2
+done
+EOL"
+    as_root chown "${SUDO_USER:-${USER}}":"${SUDO_USER:-${USER}}" "${user_home}/.xinitrc"
+    as_root chmod +x "${user_home}/.xinitrc"
+  else
+    # Wrapper mode
+    local bin_kiosk="/usr/local/bin/metro-kiosk.sh"
+    as_root bash -lc "cat > '$bin_kiosk' <<EOP
 #!/usr/bin/env bash
 set -euo pipefail
+export DISPLAY=:0
 unclutter -idle 0 &
-exec ${chromium_bin} --kiosk --noerrdialogs --disable-translate --disable-features=TranslateUI --app=http://localhost:8080/
-EOF
-  as_root chmod +x "$bin_kiosk"
+matchbox-window-manager -use_titlebar no -use_cursor no &
+exec ${browser_cmd} -Fk http://localhost:8080/
+EOP"
+    as_root chmod +x "$bin_kiosk"
+  fi
 
   # Lean kiosk service using xinit on TTY1
   as_root tee "${systemd_dir}/${svc_kiosk}" >/dev/null <<EOF
@@ -163,13 +266,16 @@ TTYPath=/dev/tty1
 StandardInput=tty
 TTYReset=yes
 TTYVHangup=yes
-ExecStart=/usr/bin/xinit ${bin_kiosk} -- :0 vt1 -keeptty
+ExecStart=/usr/bin/xinit ${user_home}/.xinitrc -- :0 vt1 -keeptty
 Restart=always
 RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
 EOF
+
+  # Avoid getty contention on TTY1 (best-effort)
+  as_root systemctl disable --now getty@tty1.service || true
 
   # Display power scripts and timers
   local bin_off="/usr/local/bin/metro-display-off.sh"
@@ -346,6 +452,7 @@ fi
 if [[ $APT_MIN -eq 1 || $APT_KIOSK -eq 1 ]]; then
   echo "Installing apt dependencies..."
   apt_install
+  configure_xorg_legacy || true
 fi
 
 if [[ ! -d .venv ]]; then

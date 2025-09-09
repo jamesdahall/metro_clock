@@ -8,7 +8,7 @@ A lightweight, kiosk-style dashboard showing WMATA rail and bus arrivals, Capita
 Table of Contents
 -----------------
 
-- Install (curl)
+- Install (clean image)
 - Goals
 - Features
 - Architecture
@@ -36,26 +36,22 @@ Table of Contents
 Install (clean image)
 ---------------------
 
-Recommended, minimal-typing install on Raspberry Pi OS Lite (Bookworm):
+Recommended, minimal‑typing installation on Raspberry Pi OS Lite:
 
-1) Prep the OS
-   - Set Wi‑Fi country (unblocks Wi‑Fi): `sudo raspi-config nonint do_wifi_country US`
-   - Update apt: `sudo apt-get update`
-
-2) Get the code and run the updater
-   - `git clone https://github.com/jamesdahall/metro_clock.git && cd metro_clock`
-   - `sudo ./update.sh --apt --kiosk --install-services --env WMATA_API_KEY=YOUR_KEY`
-
-3) Verify
-   - Backend: `systemctl status metro-clock.service` (listens on 127.0.0.1:8080)
-   - Kiosk: `systemctl status metro-kiosk.service` (starts X on TTY1)
-   - For remote testing: set `HOST=0.0.0.0` in `/etc/default/metro-clock` and visit `http://<pi-ip>:8080/`.
+1) Ensure Wi‑Fi country is set (unblocks Wi‑Fi):
+   - `sudo raspi-config nonint do_wifi_country US` (adjust country code)
+2) Download the installer and run it (interactive wizard with validation):
+   - `curl -fsSLO https://raw.githubusercontent.com/jamesdahall/metro_clock/main/install.sh`
+   - `sudo bash install.sh --wizard --full --log /var/log/metro-install.log`
+3) After install completes:
+   - Kiosk: runs on TTY1 via `xinit` + `.xinitrc` (uses `surf` on ARMv6; Chromium on ARMv7+)
+   - Check services: `systemctl status metro-clock.service metro-kiosk.service`
 
 Notes
-- On Pi Zero W (ARMv6), Chromium requires NEON and won’t run. The installer auto‑selects `surf` and launches it via a robust `.xinitrc` session with `matchbox-window-manager`.
-- On Pi 3/4/Zero 2 (ARMv7+), Chromium is used by default; override with `--browser surf` if preferred.
-- The kiosk uses `xinit` + `.xinitrc` by default; switch to a simple wrapper with `--kiosk-session wrapper` if you really need it.
-- Xorg permissions are configured (`/etc/Xwrapper.config`), and `getty@tty1` is disabled to avoid TTY contention.
+- Two‑step interactive is recommended for reliable prompts.
+- Non‑interactive one‑liner (no prompts):
+  - `curl -fsSL https://raw.githubusercontent.com/jamesdahall/metro_clock/main/install.sh | sudo bash -s -- --wmata-key 'YOUR_KEY' --home 38.8895,-77.0353 --radius 1200 --full --log /var/log/metro-install.log`
+- On Pi Zero W (ARMv6), Chromium requires NEON; the installer auto‑selects `surf` and launches it via `.xinitrc` + `matchbox-window-manager`.
 
 ---
 
@@ -129,6 +125,16 @@ WMATA API Overview
 - Bus: `NextBusService.svc` (Predictions), route config, stop metadata.
 - Auth: Single API key in header (`api_key`) or query param depending on endpoint.
 - Rate limits: Cache predictions for 10–20s; align clocks to avoid thrash; exponential backoff on 429/5xx.
+
+Getting a WMATA API key
+-----------------------
+
+- Sign up at the WMATA Developer Portal: https://developer.wmata.com/
+- Create an application to obtain your API key (sometimes called "Primary Key").
+- Keep the key private. Provide it to the app in one of these ways:
+  - During install: `--env WMATA_API_KEY=YOUR_KEY` (install.sh/update.sh)
+  - After install: add `WMATA_API_KEY=YOUR_KEY` to `/etc/default/metro-clock` and restart the service:
+    - `sudo systemctl restart metro-clock.service`
 
 Note: WMATA does not provide bikeshare dock data. For accurate bike/dock counts, we integrate Capital Bikeshare’s public GBFS feeds (see below).
 
